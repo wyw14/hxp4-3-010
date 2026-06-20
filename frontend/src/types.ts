@@ -58,6 +58,13 @@ export interface Connection {
   glowIntensity: number;
 }
 
+export interface ReplayConnection {
+  from: string;
+  to: string;
+  curve: CurvePoint[];
+  order: number;
+}
+
 export interface DrawState {
   isDrawing: boolean;
   startAnchorId: string | null;
@@ -77,6 +84,10 @@ export interface GameState {
   showFrequencies: boolean;
   isComplete: boolean;
   snapTargetId: string | null;
+  replayConnections: ReplayConnection[];
+  isReplaying: boolean;
+  replayProgress: number;
+  replayStartTime: number;
 }
 
 export interface VerifyResult {

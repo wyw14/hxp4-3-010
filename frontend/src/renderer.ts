@@ -282,7 +282,7 @@ export class Renderer {
     progress: number
   ): void {
     const connectedEdges = new Set(
-      connections.filter(c => c.valid).map(c => `${c.from}-${c.to}`)
+      connections.filter(c => c.valid && c.opacity > 0.1).map(c => `${c.from}-${c.to}`)
     );
 
     let drawCount = 0;

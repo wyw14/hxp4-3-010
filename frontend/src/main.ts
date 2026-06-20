@@ -20,6 +20,7 @@ const btnUndo = document.getElementById('btn-undo') as HTMLButtonElement;
 const btnReset = document.getElementById('btn-reset') as HTMLButtonElement;
 const btnHint = document.getElementById('btn-hint') as HTMLButtonElement;
 const btnNext = document.getElementById('btn-next') as HTMLButtonElement;
+const btnReplay = document.getElementById('btn-replay') as HTMLButtonElement;
 
 const MAX_LEVELS = 3;
 
@@ -39,26 +40,10 @@ game.setCallbacks({
     connectedCountEl.textContent = String(current);
     const pct = total > 0 ? (current / total) * 100 : 0;
     progressFillEl.style.width = `${pct}%`;
-
-    if (current < total) {
-      if (current === 0) {
-        hintTitleEl.textContent = '观察星空';
-        hintTextEl.textContent = '仔细观察星星的闪烁节奏，找到频率相同或成倍数的恒星';
-      } else if (current < total * 0.3) {
-        hintTitleEl.textContent = '初见端倪';
-        hintTextEl.textContent = '做得好！继续寻找，你会发现恒星间的谐波共振关系';
-      } else if (current < total * 0.6) {
-        hintTitleEl.textContent = '星脉初现';
-        hintTextEl.textContent = '神话生物的轮廓正在浮现，耐心连接剩余的星脉';
-      } else if (current < total) {
-        hintTitleEl.textContent = '即将完成';
-        hintTextEl.textContent = '只剩最后几颗星了！神话生物即将显现';
-      }
-    }
   },
   onComplete: (desc: string) => {
     hintTitleEl.textContent = '✨ 星座完成 ✨';
-    hintTextEl.textContent = '星界神话生物已显现！仔细欣赏它的光辉吧';
+    hintTextEl.textContent = '星界神话生物已显现！点击回放入场仪式，重温点亮过程';
 
     modalTitleEl.textContent = `✨ ${creatureNameEl.textContent} 降临 ✨`;
     modalDescEl.textContent = desc;
@@ -69,6 +54,18 @@ game.setCallbacks({
     } else {
       btnNext.textContent = '下一关';
     }
+  },
+  onReplayStart: () => {
+    completeModal.classList.remove('show');
+    hintTitleEl.textContent = '🎬 回放入场仪式';
+    hintTextEl.textContent = '按原顺序重新点亮星座的每一条星脉...';
+  },
+  onReplayComplete: () => {
+    hintTitleEl.textContent = '✨ 星座完成 ✨';
+    hintTextEl.textContent = '仪式结束！神话生物的光辉永恒闪耀';
+    setTimeout(() => {
+      completeModal.classList.add('show');
+    }, 800);
   }
 });
 
@@ -85,6 +82,10 @@ btnReset.addEventListener('click', () => {
 btnHint.addEventListener('click', () => {
   const showing = game.toggleFrequencies();
   btnHint.textContent = showing ? '隐藏频率' : '显示频率';
+});
+
+btnReplay.addEventListener('click', () => {
+  game.startReplay();
 });
 
 btnNext.addEventListener('click', async () => {

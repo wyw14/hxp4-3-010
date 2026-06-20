@@ -6,7 +6,8 @@ import type {
   ScreenPoint,
   CurvePoint,
   BackgroundStar,
-  LevelData
+  LevelData,
+  ReplayConnection
 } from './types';
 import { Renderer } from './renderer';
 import { getLevel, verifyEdge } from './api';
@@ -34,6 +35,8 @@ export class Game {
   private onLevelChange?: (level: LevelData) => void;
   private onProgressChange?: (current: number, total: number) => void;
   private onComplete?: (desc: string) => void;
+  private onReplayStart?: () => void;
+  private onReplayComplete?: () => void;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -49,7 +52,11 @@ export class Game {
       time: 0,
       showFrequencies: false,
       isComplete: false,
-      snapTargetId: null
+      snapTargetId: null,
+      replayConnections: [],
+      isReplaying: false,
+      replayProgress: 0,
+      replayStartTime: 0
     };
 
     this.resize();
@@ -70,10 +77,14 @@ export class Game {
     onLevelChange?: (level: LevelData) => void;
     onProgressChange?: (current: number, total: number) => void;
     onComplete?: (desc: string) => void;
+    onReplayStart?: () => void;
+    onReplayComplete?: () => void;
   }): void {
     this.onLevelChange = callbacks.onLevelChange;
     this.onProgressChange = callbacks.onProgressChange;
     this.onComplete = callbacks.onComplete;
+    this.onReplayStart = callbacks.onReplayStart;
+    this.onReplayComplete = callbacks.onReplayComplete;
   }
 
   private resize(): void {
@@ -227,6 +238,15 @@ export class Game {
 
         if (result.valid) {
           this.state.completedEdges.add(edgeKey);
+
+          const replayConn: ReplayConnection = {
+            from: startId,
+            to: endId,
+            curve: curvePoints,
+            order: this.state.replayConnections.length
+          };
+          this.state.replayConnections.push(replayConn);
+
           this.checkCompletion();
         } else {
           setTimeout(() => {
@@ -305,7 +325,7 @@ export class Game {
   }
 
   undoLastConnection(): void {
-    if (this.state.connections.length === 0 || this.state.isComplete) return;
+    if (this.state.connections.length === 0 || this.state.isComplete || this.state.isReplaying) return;
 
     const idx = this.state.connections.length - 1;
     const conn = this.state.connections[idx];
@@ -314,6 +334,10 @@ export class Game {
       const edgeKey = [conn.from, conn.to].sort().join('-');
       this.state.completedEdges.delete(edgeKey);
       this.onProgressChange?.(this.state.completedEdges.size, this.state.levelData?.edges.length ?? 0);
+
+      this.state.replayConnections = this.state.replayConnections.filter(
+        rc => !(rc.from === conn.from && rc.to === conn.to)
+      );
     }
 
     const duration = 300;
@@ -345,12 +369,30 @@ export class Game {
     this.state.isComplete = false;
     this.state.drawState = this.createEmptyDrawState();
     this.state.snapTargetId = null;
+    this.state.replayConnections = [];
+    this.state.isReplaying = false;
+    this.state.replayProgress = 0;
     this.onProgressChange?.(0, this.state.levelData?.edges.length ?? 0);
   }
 
   toggleFrequencies(): boolean {
     this.state.showFrequencies = !this.state.showFrequencies;
     return this.state.showFrequencies;
+  }
+
+  startReplay(): void {
+    if (this.state.replayConnections.length === 0) return;
+
+    this.state.isReplaying = true;
+    this.state.replayProgress = 0;
+    this.state.replayStartTime = performance.now();
+
+    for (const conn of this.state.connections) {
+      conn.opacity = 0;
+      conn.glowIntensity = 0;
+    }
+
+    this.onReplayStart?.();
   }
 
   async loadLevel(levelId: number): Promise<boolean> {
@@ -371,6 +413,9 @@ export class Game {
     this.state.drawState = this.createEmptyDrawState();
     this.state.snapTargetId = null;
     this.state.showFrequencies = false;
+    this.state.replayConnections = [];
+    this.state.isReplaying = false;
+    this.state.replayProgress = 0;
 
     this.onLevelChange?.(data);
     this.onProgressChange?.(0, data.edges.length);
@@ -415,9 +460,75 @@ export class Game {
       this.state.rotationOffset += this.state.levelData.rotationSpeed * delta * 60;
     }
 
+    if (this.state.isReplaying) {
+      this.updateReplay();
+    }
+
     this.state.connections.forEach(c => {
       c.opacity = Math.min(c.opacity, 1);
     });
+  }
+
+  private updateReplay(): void {
+    const totalConnections = this.state.replayConnections.length;
+    if (totalConnections === 0) {
+      this.state.isReplaying = false;
+      this.onReplayComplete?.();
+      return;
+    }
+
+    const now = performance.now();
+    const elapsed = now - this.state.replayStartTime;
+    const perConnectionDuration = 800;
+    const totalDuration = totalConnections * perConnectionDuration;
+
+    if (elapsed >= totalDuration) {
+      this.state.isReplaying = false;
+      this.state.replayProgress = 1;
+
+      for (const conn of this.state.connections) {
+        if (conn.valid) {
+          conn.opacity = 1;
+          conn.glowIntensity = 1;
+        }
+      }
+
+      this.onProgressChange?.(totalConnections, totalConnections);
+      this.onReplayComplete?.();
+      return;
+    }
+
+    const progress = elapsed / totalDuration;
+    this.state.replayProgress = progress;
+
+    const currentConnectionIndex = Math.floor(progress * totalConnections);
+    const connectionProgress = (progress * totalConnections) - currentConnectionIndex;
+
+    for (let i = 0; i < totalConnections; i++) {
+      const replayConn = this.state.replayConnections[i];
+      const conn = this.state.connections.find(
+        c => (c.from === replayConn.from && c.to === replayConn.to) ||
+             (c.from === replayConn.to && c.to === replayConn.from)
+      );
+      if (!conn) continue;
+
+      if (i < currentConnectionIndex) {
+        conn.opacity = 1;
+        conn.glowIntensity = 1;
+      } else if (i === currentConnectionIndex) {
+        const eased = 1 - Math.pow(1 - connectionProgress, 3);
+        conn.opacity = eased;
+        conn.glowIntensity = eased;
+      } else {
+        conn.opacity = 0;
+        conn.glowIntensity = 0;
+      }
+    }
+
+    this.onProgressChange?.(
+      Math.min(currentConnectionIndex + 1, totalConnections),
+      totalConnections
+    );
   }
 
   private render(): void {
@@ -458,7 +569,7 @@ export class Game {
       }
 
       const connectedIds = new Set<string>();
-      this.state.connections.filter(c => c.valid).forEach(c => {
+      this.state.connections.filter(c => c.valid && c.opacity > 0.1).forEach(c => {
         connectedIds.add(c.from);
         connectedIds.add(c.to);
       });
@@ -480,6 +591,11 @@ export class Game {
     if (!this.state.levelData) return 0;
     const total = this.state.levelData.edges.length;
     if (total === 0) return 0;
+
+    if (this.state.isReplaying) {
+      return this.state.replayProgress;
+    }
+
     return this.state.completedEdges.size / total;
   }
 
