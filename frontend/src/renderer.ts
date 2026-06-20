@@ -241,21 +241,60 @@ export class Renderer {
       const opacity = conn.opacity * pulse;
 
       if (conn.valid) {
-        this.drawCurve(conn.curve, '#ffd700', 3, opacity, true);
+        const visiblePoints = this.sliceCurve(conn.curve, conn.drawProgress);
 
-        for (const pt of conn.curve) {
-          if (Math.random() < 0.02) {
-            const r = 2 + Math.random() * 3;
-            this.ctx.beginPath();
-            this.ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
-            this.ctx.fillStyle = `rgba(255, 230, 150, ${opacity * 0.6})`;
-            this.ctx.fill();
+        if (visiblePoints.length >= 2) {
+          this.drawCurve(visiblePoints, '#ffd700', 3, opacity, true);
+
+          for (const pt of visiblePoints) {
+            if (Math.random() < 0.02) {
+              const r = 2 + Math.random() * 3;
+              this.ctx.beginPath();
+              this.ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+              this.ctx.fillStyle = `rgba(255, 230, 150, ${opacity * 0.6})`;
+              this.ctx.fill();
+            }
           }
         }
       } else {
         this.drawCurve(conn.curve, '#ff6b6b', 2, opacity * 0.6, false);
       }
     }
+  }
+
+  private sliceCurve(curve: CurvePoint[], progress: number): CurvePoint[] {
+    if (progress >= 1) return curve;
+    if (progress <= 0 || curve.length < 2) return [];
+
+    const segLengths: number[] = [];
+    let total = 0;
+    for (let i = 1; i < curve.length; i++) {
+      const dx = curve[i].x - curve[i - 1].x;
+      const dy = curve[i].y - curve[i - 1].y;
+      total += Math.sqrt(dx * dx + dy * dy);
+      segLengths.push(total);
+    }
+    if (total <= 0) return curve;
+
+    const target = total * progress;
+    let i = 0;
+    while (i < segLengths.length && segLengths[i] < target) i++;
+
+    const result: CurvePoint[] = curve.slice(0, i + 1);
+
+    if (i < segLengths.length) {
+      const segStart = i === 0 ? 0 : segLengths[i - 1];
+      const segEnd = segLengths[i];
+      const frac = segEnd > segStart ? (target - segStart) / (segEnd - segStart) : 0;
+      const p1 = curve[i];
+      const p2 = curve[i + 1];
+      result.push({
+        x: p1.x + (p2.x - p1.x) * frac,
+        y: p1.y + (p2.y - p1.y) * frac
+      });
+    }
+
+    return result;
   }
 
   drawCurrentPath(
@@ -282,7 +321,7 @@ export class Renderer {
     progress: number
   ): void {
     const connectedEdges = new Set(
-      connections.filter(c => c.valid && c.opacity > 0.1).map(c => `${c.from}-${c.to}`)
+      connections.filter(c => c.valid && c.drawProgress >= 1).map(c => `${c.from}-${c.to}`)
     );
 
     let drawCount = 0;

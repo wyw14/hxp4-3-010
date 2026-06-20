@@ -56,6 +56,7 @@ export interface Connection {
   valid: boolean;
   opacity: number;
   glowIntensity: number;
+  drawProgress: number;
 }
 
 export interface ReplayConnection {

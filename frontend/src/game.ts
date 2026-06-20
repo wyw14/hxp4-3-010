@@ -149,7 +149,7 @@ export class Game {
   }
 
   private handleMouseDown(e: MouseEvent): void {
-    if (this.state.isComplete) return;
+    if (this.state.isComplete || this.state.isReplaying) return;
 
     const pos = this.getCanvasPos(e);
     const anchor = this.findNearestAnchor(pos);
@@ -230,7 +230,8 @@ export class Game {
           curve: curvePoints,
           valid: result.valid,
           opacity: 0,
-          glowIntensity: 0
+          glowIntensity: 0,
+          drawProgress: 1
         };
 
         this.state.connections.push(connection);
@@ -390,9 +391,35 @@ export class Game {
     for (const conn of this.state.connections) {
       conn.opacity = 0;
       conn.glowIntensity = 0;
+      conn.drawProgress = 0;
     }
 
+    this.onProgressChange?.(0, this.state.replayConnections.length);
     this.onReplayStart?.();
+  }
+
+  private findConnectionForReplay(replayConn: ReplayConnection): Connection | undefined {
+    return this.state.connections.find(
+      c => (c.from === replayConn.from && c.to === replayConn.to) ||
+           (c.from === replayConn.to && c.to === replayConn.from)
+    );
+  }
+
+  private finishReplay(): void {
+    this.state.isReplaying = false;
+    this.state.replayProgress = 1;
+
+    for (const conn of this.state.connections) {
+      if (conn.valid) {
+        conn.opacity = 1;
+        conn.glowIntensity = 1;
+        conn.drawProgress = 1;
+      }
+    }
+
+    const total = this.state.replayConnections.length;
+    this.onProgressChange?.(total, total);
+    this.onReplayComplete?.();
   }
 
   async loadLevel(levelId: number): Promise<boolean> {
@@ -472,8 +499,7 @@ export class Game {
   private updateReplay(): void {
     const totalConnections = this.state.replayConnections.length;
     if (totalConnections === 0) {
-      this.state.isReplaying = false;
-      this.onReplayComplete?.();
+      this.finishReplay();
       return;
     }
 
@@ -482,53 +508,39 @@ export class Game {
     const perConnectionDuration = 800;
     const totalDuration = totalConnections * perConnectionDuration;
 
+    this.state.replayProgress = clamp(elapsed / totalDuration, 0, 1);
+
     if (elapsed >= totalDuration) {
-      this.state.isReplaying = false;
-      this.state.replayProgress = 1;
-
-      for (const conn of this.state.connections) {
-        if (conn.valid) {
-          conn.opacity = 1;
-          conn.glowIntensity = 1;
-        }
-      }
-
-      this.onProgressChange?.(totalConnections, totalConnections);
-      this.onReplayComplete?.();
+      this.finishReplay();
       return;
     }
 
-    const progress = elapsed / totalDuration;
-    this.state.replayProgress = progress;
-
-    const currentConnectionIndex = Math.floor(progress * totalConnections);
-    const connectionProgress = (progress * totalConnections) - currentConnectionIndex;
+    const overall = this.state.replayProgress * totalConnections;
+    const currentIndex = Math.floor(overall);
+    const localProgress = overall - currentIndex;
+    const easedLocal = 1 - Math.pow(1 - localProgress, 2);
 
     for (let i = 0; i < totalConnections; i++) {
       const replayConn = this.state.replayConnections[i];
-      const conn = this.state.connections.find(
-        c => (c.from === replayConn.from && c.to === replayConn.to) ||
-             (c.from === replayConn.to && c.to === replayConn.from)
-      );
+      const conn = this.findConnectionForReplay(replayConn);
       if (!conn) continue;
 
-      if (i < currentConnectionIndex) {
+      if (i < currentIndex) {
         conn.opacity = 1;
         conn.glowIntensity = 1;
-      } else if (i === currentConnectionIndex) {
-        const eased = 1 - Math.pow(1 - connectionProgress, 3);
-        conn.opacity = eased;
-        conn.glowIntensity = eased;
+        conn.drawProgress = 1;
+      } else if (i === currentIndex) {
+        conn.opacity = 1;
+        conn.glowIntensity = 1;
+        conn.drawProgress = easedLocal;
       } else {
         conn.opacity = 0;
         conn.glowIntensity = 0;
+        conn.drawProgress = 0;
       }
     }
 
-    this.onProgressChange?.(
-      Math.min(currentConnectionIndex + 1, totalConnections),
-      totalConnections
-    );
+    this.onProgressChange?.(currentIndex, totalConnections);
   }
 
   private render(): void {
@@ -569,7 +581,7 @@ export class Game {
       }
 
       const connectedIds = new Set<string>();
-      this.state.connections.filter(c => c.valid && c.opacity > 0.1).forEach(c => {
+      this.state.connections.filter(c => c.valid && c.drawProgress >= 1).forEach(c => {
         connectedIds.add(c.from);
         connectedIds.add(c.to);
       });
